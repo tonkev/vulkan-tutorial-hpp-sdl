@@ -9,6 +9,16 @@
 const int WIDTH = 800;
 const int HEIGHT = 600;
 
+const std::vector<const char*> validationLayers = {
+	"VK_LAYER_KHRONOS_validation"
+};
+
+#ifdef NDEBUG
+	const bool enableValidationLayers = false;
+#else
+	const bool enableValidationLayers = true;
+#endif
+
 class HelloTriangleApplication {
 public:
 	void run() {
@@ -19,7 +29,7 @@ public:
 	}
 
 private:
-	SDL_Window* window;
+	SDL_Window* window = nullptr;
 	SDL_Event event;
 	bool quitting = false;
 
@@ -27,11 +37,11 @@ private:
 
 	void initWindow() {
 		if (SDL_Init(SDL_INIT_VIDEO) < 0)
-			throw std::runtime_error("Failed to initialise SDL");
+			throw std::runtime_error("failed to initialise SDL!");
 
 		window = SDL_CreateWindow("Vulkan", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, WIDTH, HEIGHT, SDL_WINDOW_VULKAN);
 		if (!window)
-			throw std::runtime_error("Failed to create window");
+			throw std::runtime_error("failed to create window!");
 	}
 
 	void initVulkan() {
@@ -55,28 +65,64 @@ private:
 	}
 
 	void createInstance() {
+		if (enableValidationLayers && !checkValidationLayerSupport())
+			throw std::runtime_error("validation layers requested, but not available!");
+
 		vk::ApplicationInfo applicationInfo(
 			"Hello Triangle", VK_MAKE_VERSION(1, 0, 0),
 			"No Engine", VK_MAKE_VERSION(1, 0, 0),
 			VK_API_VERSION_1_0
 		);
 
-		unsigned int count;
-		if (!SDL_Vulkan_GetInstanceExtensions(window, &count, nullptr))
-			throw std::runtime_error("Failed to get required SDL extension count");
+		std::vector<const char*> extensions = getRequiredExtensions();
 
-		std::vector<const char*> extensions(count);
-		if (!SDL_Vulkan_GetInstanceExtensions(window, &count, extensions.data()))
-			throw std::runtime_error("Failed to get required SDL extensions");
+		size_t layerCount = 0;
+		if (enableValidationLayers)
+			layerCount = validationLayers.size();
 
 		instance = vk::createInstanceUnique(
 			vk::InstanceCreateInfo(
 				{},
 				&applicationInfo,
-				0, nullptr,
-				count, extensions.data()
+				static_cast<uint32_t>(layerCount), validationLayers.data(),
+				static_cast<uint32_t>(extensions.size()), extensions.data()
 			)
 		);
+	}
+
+	std::vector<const char*> getRequiredExtensions() {
+		unsigned int extensionCount;
+		if (!SDL_Vulkan_GetInstanceExtensions(window, &extensionCount, nullptr))
+			throw std::runtime_error("failed to get required SDL extension count!");
+
+		std::vector<const char*> extensions(extensionCount);
+		if (!SDL_Vulkan_GetInstanceExtensions(window, &extensionCount, extensions.data()))
+			throw std::runtime_error("failed to get required SDL extensions!");
+
+		if (enableValidationLayers)
+			extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+
+		return extensions;
+	}
+
+	bool checkValidationLayerSupport() {
+		std::vector<vk::LayerProperties> availableLayers = vk::enumerateInstanceLayerProperties();
+
+		for (const char* layerName : validationLayers) {
+			bool layerFound = false;
+
+			for (const auto& layerProperties : availableLayers) {
+				if (strcmp(layerName, layerProperties.layerName)) {
+					layerFound = true;
+					break;
+				}
+			}
+
+			if (!layerFound)
+				return false;
+		}
+
+		return true;
 	}
 };
 
