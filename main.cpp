@@ -1,3 +1,5 @@
+#include <vulkan/vulkan.hpp>
+
 #include <SDL.h>
 #include <SDL_vulkan.h>
 
@@ -21,17 +23,19 @@ private:
 	SDL_Event event;
 	bool quitting = false;
 
+	vk::UniqueInstance instance;
+
 	void initWindow() {
 		if (SDL_Init(SDL_INIT_VIDEO) < 0)
 			throw std::runtime_error("Failed to initialise SDL");
 
-		window = SDL_CreateWindow("Vulkan", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, WIDTH, HEIGHT, 0);
+		window = SDL_CreateWindow("Vulkan", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, WIDTH, HEIGHT, SDL_WINDOW_VULKAN);
 		if (!window)
 			throw std::runtime_error("Failed to create window");
 	}
 
 	void initVulkan() {
-
+		createInstance();
 	}
 
 	void mainLoop() {
@@ -48,6 +52,31 @@ private:
 		SDL_DestroyWindow(window);
 
 		SDL_Quit();
+	}
+
+	void createInstance() {
+		vk::ApplicationInfo applicationInfo(
+			"Hello Triangle", VK_MAKE_VERSION(1, 0, 0),
+			"No Engine", VK_MAKE_VERSION(1, 0, 0),
+			VK_API_VERSION_1_0
+		);
+
+		unsigned int count;
+		if (!SDL_Vulkan_GetInstanceExtensions(window, &count, nullptr))
+			throw std::runtime_error("Failed to get required SDL extension count");
+
+		std::vector<const char*> extensions(count);
+		if (!SDL_Vulkan_GetInstanceExtensions(window, &count, extensions.data()))
+			throw std::runtime_error("Failed to get required SDL extensions");
+
+		instance = vk::createInstanceUnique(
+			vk::InstanceCreateInfo(
+				{},
+				&applicationInfo,
+				0, nullptr,
+				count, extensions.data()
+			)
+		);
 	}
 };
 
