@@ -6,6 +6,7 @@
 #include <iostream>
 #include <stdexcept>
 #include <optional>
+#include <set>
 
 const int WIDTH = 800;
 const int HEIGHT = 600;
@@ -44,9 +45,10 @@ VKAPI_ATTR void VKAPI_CALL vkDestroyDebugUtilsMessengerEXT(
 
 struct QueueFamilyIndices {
 	std::optional<uint32_t> graphicsFamily;
+	std::optional<uint32_t> presentFamily;
 
 	bool isComplete() {
-		return graphicsFamily.has_value();
+		return graphicsFamily.has_value() && presentFamily.has_value();
 	}
 };
 
@@ -66,9 +68,13 @@ private:
 
 	vk::UniqueInstance instance;
 	vk::UniqueDebugUtilsMessengerEXT debugMessenger;
+	vk::UniqueSurfaceKHR surface;
+
 	vk::PhysicalDevice physicalDevice;
 	vk::UniqueDevice device;
+
 	vk::Queue graphicsQueue;
+	vk::Queue presentQueue;
 
 	void initWindow() {
 		if (SDL_Init(SDL_INIT_VIDEO) < 0)
@@ -82,6 +88,7 @@ private:
 	void initVulkan() {
 		createInstance();
 		setupDebugMessenger();
+		createSurface();
 		pickPhysicalDevice();
 		createLogicalDevice();
 	}
@@ -149,12 +156,19 @@ private:
 		);
 	}
 
+	void createSurface() {
+		vk::SurfaceKHR tmpSurface;
+		if (!SDL_Vulkan_CreateSurface(window, static_cast<VkInstance>(instance.get()), reinterpret_cast<VkSurfaceKHR*>(&tmpSurface)))
+			throw std::runtime_error("failed to create SDL surface!");
+		surface = vk::UniqueSurfaceKHR(tmpSurface, instance.get());
+	}
+
 	void pickPhysicalDevice() {
 		bool deviceFound = false;
 		std::vector<vk::PhysicalDevice> physicalDevices = instance->enumeratePhysicalDevices();
 
 		if (physicalDevices.size() == 0)
-			throw std::runtime_error("failed to fin GPUs with Vulkan support!");
+			throw std::runtime_error("failed to find GPUs with Vulkan support!");
 
 		for (const auto& device : physicalDevices) {
 			if (isDeviceSuitable(device)) {
@@ -171,8 +185,15 @@ private:
 	void createLogicalDevice() {
 		QueueFamilyIndices indices = findQueueFamilies(physicalDevice);
 
+		std::vector<vk::DeviceQueueCreateInfo> queueCreateInfos;
+		std::set<uint32_t> uniqueQueueFamilies = {indices.graphicsFamily.value(), indices.presentFamily.value()};
+
 		float queuePriority = 1.0f;
-		vk::DeviceQueueCreateInfo deviceQueueCreateInfo({}, indices.graphicsFamily.value(), 1, &queuePriority);
+		for (uint32_t queueFamily : uniqueQueueFamilies) {
+			queueCreateInfos.push_back(
+				vk::DeviceQueueCreateInfo({}, queueFamily, 1, &queuePriority)
+			);
+		}
 		vk::PhysicalDeviceFeatures deviceFeatures = {};
 
 		uint32_t enabledLayerCount = 0;
@@ -182,7 +203,7 @@ private:
 		device = physicalDevice.createDeviceUnique(
 			vk::DeviceCreateInfo(
 				{},
-				1, &deviceQueueCreateInfo,
+				static_cast<uint32_t>(queueCreateInfos.size()), queueCreateInfos.data(),
 				enabledLayerCount, validationLayers.data(),
 				0, nullptr,
 				&deviceFeatures
@@ -190,6 +211,7 @@ private:
 		);
 
 		graphicsQueue = device->getQueue(indices.graphicsFamily.value(), 0);
+		presentQueue = device->getQueue(indices.presentFamily.value(), 0);
 	}
 
 	bool isDeviceSuitable(vk::PhysicalDevice device) {
@@ -207,6 +229,9 @@ private:
 		for (const auto& queueFamily : queueFamilies) {
 			if (queueFamily.queueFlags & vk::QueueFlagBits::eGraphics)
 				indices.graphicsFamily = i;
+
+			if (device.getSurfaceSupportKHR(i, surface.get()))
+				indices.presentFamily = i;
 
 			if (indices.isComplete())
 				break;
