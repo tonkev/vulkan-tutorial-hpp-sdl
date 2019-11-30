@@ -67,6 +67,8 @@ private:
 	vk::UniqueInstance instance;
 	vk::UniqueDebugUtilsMessengerEXT debugMessenger;
 	vk::PhysicalDevice physicalDevice;
+	vk::UniqueDevice device;
+	vk::Queue graphicsQueue;
 
 	void initWindow() {
 		if (SDL_Init(SDL_INIT_VIDEO) < 0)
@@ -81,6 +83,7 @@ private:
 		createInstance();
 		setupDebugMessenger();
 		pickPhysicalDevice();
+		createLogicalDevice();
 	}
 
 	void mainLoop() {
@@ -163,6 +166,30 @@ private:
 
 		if (!deviceFound)
 			throw std::runtime_error("failed to find a suitable GPU!");
+	}
+
+	void createLogicalDevice() {
+		QueueFamilyIndices indices = findQueueFamilies(physicalDevice);
+
+		float queuePriority = 1.0f;
+		vk::DeviceQueueCreateInfo deviceQueueCreateInfo({}, indices.graphicsFamily.value(), 1, &queuePriority);
+		vk::PhysicalDeviceFeatures deviceFeatures = {};
+
+		uint32_t enabledLayerCount = 0;
+		if (enableValidationLayers)
+			enabledLayerCount = static_cast<uint32_t>(validationLayers.size());
+		
+		device = physicalDevice.createDeviceUnique(
+			vk::DeviceCreateInfo(
+				{},
+				1, &deviceQueueCreateInfo,
+				enabledLayerCount, validationLayers.data(),
+				0, nullptr,
+				&deviceFeatures
+			)
+		);
+
+		graphicsQueue = device->getQueue(indices.graphicsFamily.value(), 0);
 	}
 
 	bool isDeviceSuitable(vk::PhysicalDevice device) {
