@@ -19,6 +19,28 @@ const std::vector<const char*> validationLayers = {
 	const bool enableValidationLayers = true;
 #endif
 
+VKAPI_ATTR VkResult VKAPI_CALL vkCreateDebugUtilsMessengerEXT(
+	VkInstance instance, const VkDebugUtilsMessengerCreateInfoEXT* pCreateInfo,
+	const VkAllocationCallbacks* pAllocator, VkDebugUtilsMessengerEXT* pDebugMessenger) {
+	
+	auto func = (PFN_vkCreateDebugUtilsMessengerEXT)vkGetInstanceProcAddr(instance, "vkCreateDebugUtilsMessengerEXT");
+	if (func != nullptr) {
+		return func(instance, pCreateInfo, pAllocator, pDebugMessenger);
+	} else {
+		return VK_ERROR_EXTENSION_NOT_PRESENT;
+	}
+}
+
+VKAPI_ATTR void VKAPI_CALL vkDestroyDebugUtilsMessengerEXT(
+	VkInstance instance, VkDebugUtilsMessengerEXT debugMessenger,
+	VkAllocationCallbacks const* pAllocator) {
+
+	auto func = (PFN_vkDestroyDebugUtilsMessengerEXT)vkGetInstanceProcAddr(instance, "vkDestroyDebugUtilsMessengerEXT");
+	if (func != nullptr) {
+		func(instance, debugMessenger, pAllocator);
+	}
+}
+
 class HelloTriangleApplication {
 public:
 	void run() {
@@ -34,6 +56,7 @@ private:
 	bool quitting = false;
 
 	vk::UniqueInstance instance;
+	vk::UniqueDebugUtilsMessengerEXT debugMessenger;
 
 	void initWindow() {
 		if (SDL_Init(SDL_INIT_VIDEO) < 0)
@@ -46,6 +69,7 @@ private:
 
 	void initVulkan() {
 		createInstance();
+		setupDebugMessenger();
 	}
 
 	void mainLoop() {
@@ -80,13 +104,34 @@ private:
 		if (enableValidationLayers)
 			layerCount = validationLayers.size();
 
+		vk::DebugUtilsMessengerCreateInfoEXT debugMessengerCreateInfo = getDebugUtilsMessengerCreateInfo();
+		vk::InstanceCreateInfo instanceCreateInfo(
+			{}, &applicationInfo,
+			static_cast<uint32_t>(layerCount), validationLayers.data(),
+			static_cast<uint32_t>(extensions.size()), extensions.data()
+		);
+		instanceCreateInfo.pNext = &debugMessengerCreateInfo;
+
 		instance = vk::createInstanceUnique(
-			vk::InstanceCreateInfo(
-				{},
-				&applicationInfo,
-				static_cast<uint32_t>(layerCount), validationLayers.data(),
-				static_cast<uint32_t>(extensions.size()), extensions.data()
-			)
+			instanceCreateInfo
+		);
+	}
+
+	vk::DebugUtilsMessengerCreateInfoEXT getDebugUtilsMessengerCreateInfo() {
+		return vk::DebugUtilsMessengerCreateInfoEXT(
+			{},
+			vk::DebugUtilsMessageSeverityFlagBitsEXT::eVerbose | vk::DebugUtilsMessageSeverityFlagBitsEXT::eWarning | vk::DebugUtilsMessageSeverityFlagBitsEXT::eError,
+			vk::DebugUtilsMessageTypeFlagBitsEXT::eGeneral | vk::DebugUtilsMessageTypeFlagBitsEXT::eValidation | vk::DebugUtilsMessageTypeFlagBitsEXT::ePerformance,
+			&debugCallback
+		);
+	}
+
+	void setupDebugMessenger() {
+		if (!enableValidationLayers)
+			return;
+
+		debugMessenger = instance->createDebugUtilsMessengerEXTUnique(
+			getDebugUtilsMessengerCreateInfo()
 		);
 	}
 
@@ -123,6 +168,17 @@ private:
 		}
 
 		return true;
+	}
+
+	static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(
+		VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
+		VkDebugUtilsMessageTypeFlagsEXT messageType,
+		const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData,
+		void* pUserData) {
+
+		std::cerr << "validation layer: " << pCallbackData->pMessage << std::endl;
+
+		return VK_FALSE;
 	}
 };
 
