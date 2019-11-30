@@ -5,6 +5,7 @@
 
 #include <iostream>
 #include <stdexcept>
+#include <optional>
 
 const int WIDTH = 800;
 const int HEIGHT = 600;
@@ -41,6 +42,14 @@ VKAPI_ATTR void VKAPI_CALL vkDestroyDebugUtilsMessengerEXT(
 	}
 }
 
+struct QueueFamilyIndices {
+	std::optional<uint32_t> graphicsFamily;
+
+	bool isComplete() {
+		return graphicsFamily.has_value();
+	}
+};
+
 class HelloTriangleApplication {
 public:
 	void run() {
@@ -57,6 +66,7 @@ private:
 
 	vk::UniqueInstance instance;
 	vk::UniqueDebugUtilsMessengerEXT debugMessenger;
+	vk::PhysicalDevice physicalDevice;
 
 	void initWindow() {
 		if (SDL_Init(SDL_INIT_VIDEO) < 0)
@@ -70,6 +80,7 @@ private:
 	void initVulkan() {
 		createInstance();
 		setupDebugMessenger();
+		pickPhysicalDevice();
 	}
 
 	void mainLoop() {
@@ -133,6 +144,50 @@ private:
 		debugMessenger = instance->createDebugUtilsMessengerEXTUnique(
 			getDebugUtilsMessengerCreateInfo()
 		);
+	}
+
+	void pickPhysicalDevice() {
+		bool deviceFound = false;
+		std::vector<vk::PhysicalDevice> physicalDevices = instance->enumeratePhysicalDevices();
+
+		if (physicalDevices.size() == 0)
+			throw std::runtime_error("failed to fin GPUs with Vulkan support!");
+
+		for (const auto& device : physicalDevices) {
+			if (isDeviceSuitable(device)) {
+				physicalDevice = device;
+				deviceFound = true;
+				break;
+			}
+		}
+
+		if (!deviceFound)
+			throw std::runtime_error("failed to find a suitable GPU!");
+	}
+
+	bool isDeviceSuitable(vk::PhysicalDevice device) {
+		QueueFamilyIndices indices = findQueueFamilies(device);
+
+		return indices.isComplete();
+	}
+
+	QueueFamilyIndices findQueueFamilies(vk::PhysicalDevice device) {
+		QueueFamilyIndices indices;
+
+		std::vector<vk::QueueFamilyProperties> queueFamilies = device.getQueueFamilyProperties();
+
+		int i = 0;
+		for (const auto& queueFamily : queueFamilies) {
+			if (queueFamily.queueFlags & vk::QueueFlagBits::eGraphics)
+				indices.graphicsFamily = i;
+
+			if (indices.isComplete())
+				break;
+
+			i++;
+		}
+
+		return indices;
 	}
 
 	std::vector<const char*> getRequiredExtensions() {
