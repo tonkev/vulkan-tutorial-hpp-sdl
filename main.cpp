@@ -4,6 +4,7 @@
 #include <SDL_vulkan.h>
 
 #include <iostream>
+#include <fstream>
 #include <stdexcept>
 #include <optional>
 #include <set>
@@ -109,6 +110,7 @@ private:
 		createLogicalDevice();
 		createSwapchain();
 		createImageViews();
+		createGraphicsPipeline();
 	}
 
 	void mainLoop() {
@@ -287,6 +289,31 @@ private:
 		}
 	}
 
+	void createGraphicsPipeline() {
+		auto vertShaderCode = readFile("shaders/vert.spv");
+		auto fragShaderCode = readFile("shaders/frag.spv");
+
+		vk::UniqueShaderModule vertShaderModule = createShaderModule(vertShaderCode);
+		vk::UniqueShaderModule fragShaderModule = createShaderModule(fragShaderCode);
+
+		vk::PipelineShaderStageCreateInfo vertShaderStageInfo(
+			vk::PipelineShaderStageCreateFlags(), vk::ShaderStageFlagBits::eVertex, vertShaderModule.get(), "main"
+		);
+		vk::PipelineShaderStageCreateInfo fragShaderStageInfo(
+			vk::PipelineShaderStageCreateFlags(), vk::ShaderStageFlagBits::eFragment, fragShaderModule.get(), "main"
+		);
+
+		vk::PipelineShaderStageCreateInfo shaderStages[] = {vertShaderStageInfo, fragShaderStageInfo};
+	}
+
+	vk::UniqueShaderModule createShaderModule(const std::vector<char>& code) {
+		return device->createShaderModuleUnique(
+			vk::ShaderModuleCreateInfo(
+				vk::ShaderModuleCreateFlags(), code.size(), reinterpret_cast<const uint32_t*>(code.data())
+			)
+		);
+	}
+
 	vk::SurfaceFormatKHR chooseSwapSurfaceFormat(const std::vector<vk::SurfaceFormatKHR>& availableFormats) {
 		for (const auto& availableFormat : availableFormats) {
 			if (availableFormat.format == vk::Format::eB8G8R8A8Unorm && availableFormat.colorSpace == vk::ColorSpaceKHR::eSrgbNonlinear)
@@ -408,6 +435,23 @@ private:
 		}
 
 		return true;
+	}
+
+	static std::vector<char> readFile(const std::string& filename) {
+		std::ifstream file(filename, std::ios::ate | std::ios::binary);
+
+		if (!file.is_open())
+			throw std::runtime_error("failed to open file!");
+
+		size_t fileSize = (size_t) file.tellg();
+		std::vector<char> buffer(fileSize);
+
+		file.seekg(0);
+		file.read(buffer.data(), fileSize);
+
+		file.close();
+
+		return buffer;
 	}
 
 	static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(
