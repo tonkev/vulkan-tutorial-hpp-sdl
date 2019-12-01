@@ -93,6 +93,8 @@ private:
 	vk::Extent2D swapchainExtent;
 	std::vector<vk::UniqueImageView> swapchainImageViews;
 
+	vk::UniquePipelineLayout pipelineLayout;
+
 	void initWindow() {
 		if (SDL_Init(SDL_INIT_VIDEO) < 0)
 			throw std::runtime_error("failed to initialise SDL!");
@@ -304,6 +306,46 @@ private:
 		);
 
 		vk::PipelineShaderStageCreateInfo shaderStages[] = {vertShaderStageInfo, fragShaderStageInfo};
+
+		vk::PipelineVertexInputStateCreateInfo vertexInputInfo(
+			vk::PipelineVertexInputStateCreateFlags(), 0, nullptr, 0, nullptr
+		);
+
+		vk::PipelineInputAssemblyStateCreateInfo inputAssembly(
+			vk::PipelineInputAssemblyStateCreateFlags(), vk::PrimitiveTopology::eTriangleList, false
+		);
+
+		vk::Viewport viewport(0.0f, 0.0f, (float) swapchainExtent.width, (float) swapchainExtent.height, 0.0f, 1.0f);
+
+		vk::Rect2D scissor({0, 0}, swapchainExtent);
+
+		vk::PipelineViewportStateCreateInfo viewportState(
+			vk::PipelineViewportStateCreateFlags(), 1, &viewport, 1, &scissor
+		);
+
+		vk::PipelineRasterizationStateCreateInfo rasterizer(
+			vk::PipelineRasterizationStateCreateFlags(), false, false,
+			vk::PolygonMode::eFill, vk::CullModeFlagBits::eBack, vk::FrontFace::eClockwise, 
+			false, 0.0f, 0.0f, 0.0f, 1.0f
+		);
+
+		vk::PipelineMultisampleStateCreateInfo multisampling(
+			vk::PipelineMultisampleStateCreateFlags(), vk::SampleCountFlagBits::e1, 
+			false, 1.0f, nullptr, false, false
+		);
+
+		vk::PipelineColorBlendAttachmentState colorBlendAttachment(false);
+		colorBlendAttachment.colorWriteMask =
+			vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG |
+			vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA;
+
+		vk::PipelineColorBlendStateCreateInfo colorBlending(
+			vk::PipelineColorBlendStateCreateFlags(), false, vk::LogicOp::eClear, 1, &colorBlendAttachment
+		);
+
+		pipelineLayout = device->createPipelineLayoutUnique(
+			vk::PipelineLayoutCreateInfo(vk::PipelineLayoutCreateFlags(), 0, nullptr, 0, nullptr)
+		);
 	}
 
 	vk::UniqueShaderModule createShaderModule(const std::vector<char>& code) {
