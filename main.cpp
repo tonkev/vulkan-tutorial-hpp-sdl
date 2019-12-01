@@ -95,6 +95,7 @@ private:
 
 	vk::UniqueRenderPass renderPass;
 	vk::UniquePipelineLayout pipelineLayout;
+	std::vector<vk::UniquePipeline> graphicsPipelines;
 
 	void initWindow() {
 		if (SDL_Init(SDL_INIT_VIDEO) < 0)
@@ -359,7 +360,8 @@ private:
 			false, 1.0f, nullptr, false, false
 		);
 
-		vk::PipelineColorBlendAttachmentState colorBlendAttachment(false);
+		vk::PipelineColorBlendAttachmentState colorBlendAttachment;
+		colorBlendAttachment.blendEnable = false;
 		colorBlendAttachment.colorWriteMask =
 			vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG |
 			vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA;
@@ -371,6 +373,21 @@ private:
 		pipelineLayout = device->createPipelineLayoutUnique(
 			vk::PipelineLayoutCreateInfo(vk::PipelineLayoutCreateFlags(), 0, nullptr, 0, nullptr)
 		);
+
+		vk::GraphicsPipelineCreateInfo pipelineInfo;
+		pipelineInfo.stageCount = 2;
+		pipelineInfo.pStages = shaderStages;
+		pipelineInfo.pVertexInputState = &vertexInputInfo;
+		pipelineInfo.pInputAssemblyState = &inputAssembly;
+		pipelineInfo.pViewportState = &viewportState;
+		pipelineInfo.pRasterizationState = &rasterizer;
+		pipelineInfo.pMultisampleState = &multisampling;
+		pipelineInfo.pColorBlendState = &colorBlending;
+		pipelineInfo.layout = pipelineLayout.get();
+		pipelineInfo.renderPass = renderPass.get();
+		pipelineInfo.subpass = 0;
+
+		graphicsPipelines = device->createGraphicsPipelinesUnique({}, pipelineInfo);
 	}
 
 	vk::UniqueShaderModule createShaderModule(const std::vector<char>& code) {
