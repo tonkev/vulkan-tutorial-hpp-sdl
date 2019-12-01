@@ -90,6 +90,7 @@ private:
 	std::vector<vk::Image> swapchainImages;
 	vk::Format swapchainImageFormat;
 	vk::Extent2D swapchainExtent;
+	std::vector<vk::UniqueImageView> swapchainImageViews;
 
 	void initWindow() {
 		if (SDL_Init(SDL_INIT_VIDEO) < 0)
@@ -107,6 +108,7 @@ private:
 		pickPhysicalDevice();
 		createLogicalDevice();
 		createSwapchain();
+		createImageViews();
 	}
 
 	void mainLoop() {
@@ -264,6 +266,25 @@ private:
 		swapchainImages = device->getSwapchainImagesKHR(swapchain.get());
 		swapchainImageFormat = surfaceFormat.format;
 		swapchainExtent = extent;
+	}
+
+	void createImageViews() {
+		swapchainImageViews.resize(swapchainImages.size());
+
+		for (size_t i = 0; i < swapchainImages.size(); ++i) {
+			swapchainImageViews.push_back(
+				device->createImageViewUnique(
+					vk::ImageViewCreateInfo(
+						vk::ImageViewCreateFlags(), swapchainImages[i],
+						vk::ImageViewType::e2D, swapchainImageFormat,
+						vk::ComponentMapping(),
+						vk::ImageSubresourceRange(
+							vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1
+						)
+					)
+				)
+			);
+		}
 	}
 
 	vk::SurfaceFormatKHR chooseSwapSurfaceFormat(const std::vector<vk::SurfaceFormatKHR>& availableFormats) {
