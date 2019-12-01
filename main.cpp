@@ -92,6 +92,7 @@ private:
 	vk::Format swapchainImageFormat;
 	vk::Extent2D swapchainExtent;
 	std::vector<vk::UniqueImageView> swapchainImageViews;
+	std::vector<vk::UniqueFramebuffer> swapchainFramebuffers;
 
 	vk::UniqueRenderPass renderPass;
 	vk::UniquePipelineLayout pipelineLayout;
@@ -116,6 +117,7 @@ private:
 		createImageViews();
 		createRenderPass();
 		createGraphicsPipeline();
+		createFramebuffers();
 	}
 
 	void mainLoop() {
@@ -279,15 +281,13 @@ private:
 		swapchainImageViews.resize(swapchainImages.size());
 
 		for (size_t i = 0; i < swapchainImages.size(); ++i) {
-			swapchainImageViews.push_back(
-				device->createImageViewUnique(
-					vk::ImageViewCreateInfo(
-						vk::ImageViewCreateFlags(), swapchainImages[i],
-						vk::ImageViewType::e2D, swapchainImageFormat,
-						vk::ComponentMapping(),
-						vk::ImageSubresourceRange(
-							vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1
-						)
+			swapchainImageViews[i] = device->createImageViewUnique(
+				vk::ImageViewCreateInfo(
+					vk::ImageViewCreateFlags(), swapchainImages[i],
+					vk::ImageViewType::e2D, swapchainImageFormat,
+					vk::ComponentMapping(),
+					vk::ImageSubresourceRange(
+						vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1
 					)
 				)
 			);
@@ -388,6 +388,23 @@ private:
 		pipelineInfo.subpass = 0;
 
 		graphicsPipelines = device->createGraphicsPipelinesUnique({}, pipelineInfo);
+	}
+
+	void createFramebuffers() {
+		swapchainFramebuffers.resize(swapchainImageViews.size());
+
+		for (size_t i = 0; i < swapchainImageViews.size(); ++i) {
+			vk::ImageView attachments[] = {swapchainImageViews[i].get()};
+
+			swapchainFramebuffers[i] = device->createFramebufferUnique(
+				vk::FramebufferCreateInfo(
+					vk::FramebufferCreateFlags(), renderPass.get(),
+					1, attachments,
+					swapchainExtent.width, swapchainExtent.height,
+					1
+				)
+			);
+		}
 	}
 
 	vk::UniqueShaderModule createShaderModule(const std::vector<char>& code) {
