@@ -12,6 +12,8 @@
 const int WIDTH = 800;
 const int HEIGHT = 600;
 
+const int MAX_FRAMES_IN_FLIGHT = 2;
+
 const std::vector<const char*> validationLayers = {
 	"VK_LAYER_KHRONOS_validation"
 };
@@ -101,6 +103,12 @@ private:
 	vk::UniqueCommandPool commandPool;
 	std::vector<vk::UniqueCommandBuffer> commandBuffers;
 
+	std::vector<vk::UniqueSemaphore> imageAvailableSemaphores;
+	std::vector<vk::UniqueSemaphore> renderFinishedSemaphores;
+	std::vector<vk::UniqueFence> inFlightFences;
+	std::vector<size_t> imagesInFlight;
+	size_t currentFrame = 0;
+
 	void initWindow() {
 		if (SDL_Init(SDL_INIT_VIDEO) < 0)
 			throw std::runtime_error("failed to initialise SDL!");
@@ -122,6 +130,8 @@ private:
 		createGraphicsPipeline();
 		createFramebuffers();
 		createCommandPool();
+		createCommandBuffers();
+		createSyncObjects();
 	}
 
 	void mainLoop() {
@@ -131,7 +141,10 @@ private:
 					quitting = true;
 				}
 			}
+			drawFrame();
 		}
+
+		device->waitIdle();
 	}
 
 	void cleanup() {
@@ -314,9 +327,16 @@ private:
 		subpass.colorAttachmentCount = 1;
 		subpass.pColorAttachments = &colorAttachmentRef;
 
+		vk::SubpassDependency dependency(
+			(uint32_t) VK_SUBPASS_EXTERNAL, (uint32_t) 0,
+			vk::PipelineStageFlagBits::eColorAttachmentOutput, vk::PipelineStageFlagBits::eColorAttachmentOutput,
+			vk::AccessFlags(), vk::AccessFlagBits::eColorAttachmentRead | vk::AccessFlagBits::eColorAttachmentWrite,
+			vk::DependencyFlags()
+		);
+
 		renderPass = device->createRenderPassUnique(
 			vk::RenderPassCreateInfo(
-				vk::RenderPassCreateFlags(), 1, &colorAttachment, 1, &subpass
+				vk::RenderPassCreateFlags(), 1, &colorAttachment, 1, &subpass, 1, &dependency
 			)
 		);
 	}
@@ -452,6 +472,51 @@ private:
 
 			commandBuffers[i]->end();
 		}
+	}
+
+	void createSyncObjects() {
+		imageAvailableSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
+		renderFinishedSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
+		inFlightFences.resize(MAX_FRAMES_IN_FLIGHT);
+		imagesInFlight.resize(swapchainImages.size(), -1);
+
+		for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
+			imageAvailableSemaphores[i] = device->createSemaphoreUnique(vk::SemaphoreCreateInfo(vk::SemaphoreCreateFlags()));
+			renderFinishedSemaphores[i] = device->createSemaphoreUnique(vk::SemaphoreCreateInfo(vk::SemaphoreCreateFlags()));
+			inFlightFences[i] = device->createFenceUnique(vk::FenceCreateInfo(vk::FenceCreateFlagBits::eSignaled));
+		}
+	}
+
+	void drawFrame() {
+		device->waitForFences(1, &inFlightFences[currentFrame].get(), true, UINT64_MAX);
+
+		vk::ResultValue<uint32_t> result = device->acquireNextImageKHR(swapchain.get(), (uint64_t)UINT64_MAX, imageAvailableSemaphores[currentFrame].get(), nullptr);
+		
+		if (imagesInFlight[result.value] != -1) 
+			device->waitForFences(1, &inFlightFences[imagesInFlight[result.value]].get(), true, UINT64_MAX);
+		imagesInFlight[result.value] = currentFrame;
+		
+		vk::PipelineStageFlags waitStages = {vk::PipelineStageFlagBits::eColorAttachmentOutput};
+
+		device->resetFences(1, &inFlightFences[currentFrame].get());
+
+		graphicsQueue.submit(
+			vk::SubmitInfo(
+				(uint32_t) 1, &imageAvailableSemaphores[currentFrame].get(), &waitStages,
+				(uint32_t) 1, &(commandBuffers[result.value].get()),
+				(uint32_t) 1, &renderFinishedSemaphores[currentFrame].get()
+			), inFlightFences[currentFrame].get()
+		);
+
+		presentQueue.presentKHR(
+			vk::PresentInfoKHR(
+				1, &renderFinishedSemaphores[currentFrame].get(),
+				1, &swapchain.get(),
+				&result.value, nullptr
+			)
+		);
+
+		currentFrame = (currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
 	}
 
 	vk::UniqueShaderModule createShaderModule(const std::vector<char>& code) {
