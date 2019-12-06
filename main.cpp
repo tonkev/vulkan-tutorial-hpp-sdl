@@ -98,6 +98,9 @@ private:
 	vk::UniquePipelineLayout pipelineLayout;
 	std::vector<vk::UniquePipeline> graphicsPipelines;
 
+	vk::UniqueCommandPool commandPool;
+	std::vector<vk::UniqueCommandBuffer> commandBuffers;
+
 	void initWindow() {
 		if (SDL_Init(SDL_INIT_VIDEO) < 0)
 			throw std::runtime_error("failed to initialise SDL!");
@@ -118,6 +121,7 @@ private:
 		createRenderPass();
 		createGraphicsPipeline();
 		createFramebuffers();
+		createCommandPool();
 	}
 
 	void mainLoop() {
@@ -404,6 +408,49 @@ private:
 					1
 				)
 			);
+		}
+	}
+
+	void createCommandPool() {
+		QueueFamilyIndices queueFamilyIndices = findQueueFamilies(physicalDevice);
+
+		commandPool = device->createCommandPoolUnique(
+			vk::CommandPoolCreateInfo(
+				vk::CommandPoolCreateFlags(), queueFamilyIndices.graphicsFamily.value()
+			)
+		);
+	}
+
+	void createCommandBuffers() {
+		commandBuffers.resize(swapchainFramebuffers.size());
+
+		commandBuffers = device->allocateCommandBuffersUnique(
+			vk::CommandBufferAllocateInfo(
+				commandPool.get(), vk::CommandBufferLevel::ePrimary, static_cast<uint32_t>(commandBuffers.size())
+			)
+		);
+
+		for (size_t i = 0; i < commandBuffers.size(); ++i) {
+			commandBuffers[i]->begin(
+				vk::CommandBufferBeginInfo(
+					vk::CommandBufferUsageFlags(), nullptr
+				)
+			);
+
+			vk::ClearValue clearValue;
+			clearValue.color = vk::ClearColorValue(std::array<float, 4>{0.0f, 0.0f, 0.0f, 1.0f});
+			vk::RenderPassBeginInfo renderPassBeginInfo(
+				renderPass.get(), swapchainFramebuffers[i].get(), vk::Rect2D({0, 0}, swapchainExtent), (uint32_t) 1, &clearValue
+			);
+			commandBuffers[i]->beginRenderPass(&renderPassBeginInfo, vk::SubpassContents::eInline);
+
+			commandBuffers[i]->bindPipeline(vk::PipelineBindPoint::eGraphics, graphicsPipelines[0].get());
+
+			commandBuffers[i]->draw(3, 1, 0, 0);
+
+			commandBuffers[i]->endRenderPass();
+
+			commandBuffers[i]->end();
 		}
 	}
 
