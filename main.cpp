@@ -113,7 +113,7 @@ private:
 		if (SDL_Init(SDL_INIT_VIDEO) < 0)
 			throw std::runtime_error("failed to initialise SDL!");
 
-		window = SDL_CreateWindow("Vulkan", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, WIDTH, HEIGHT, SDL_WINDOW_VULKAN);
+		window = SDL_CreateWindow("Vulkan", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, WIDTH, HEIGHT, SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE);
 		if (!window)
 			throw std::runtime_error("failed to create window!");
 	}
@@ -139,6 +139,9 @@ private:
 			while (SDL_PollEvent(&event) != 0) {
 				if (event.type == SDL_QUIT) {
 					quitting = true;
+				}
+				if (event.type == SDL_WINDOWEVENT && event.window.event == SDL_WINDOWEVENT_RESIZED) {
+					recreateSwapchain();
 				}
 			}
 			drawFrame();
@@ -491,6 +494,11 @@ private:
 		device->waitForFences(1, &inFlightFences[currentFrame].get(), true, UINT64_MAX);
 
 		vk::ResultValue<uint32_t> result = device->acquireNextImageKHR(swapchain.get(), (uint64_t)UINT64_MAX, imageAvailableSemaphores[currentFrame].get(), nullptr);
+
+		if (result.result == vk::Result::eErrorOutOfDateKHR) {
+			recreateSwapchain();
+			return;
+		}
 		
 		if (imagesInFlight[result.value] != -1) 
 			device->waitForFences(1, &inFlightFences[imagesInFlight[result.value]].get(), true, UINT64_MAX);
@@ -517,6 +525,21 @@ private:
 		);
 
 		currentFrame = (currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
+	}
+
+	void recreateSwapchain() {		
+		device->waitIdle();
+
+		createSwapchain();
+		createImageViews();
+		createRenderPass();
+		createGraphicsPipeline();
+		createFramebuffers();
+
+		commandBuffers.clear();
+
+		createCommandPool();
+		createCommandBuffers();
 	}
 
 	vk::UniqueShaderModule createShaderModule(const std::vector<char>& code) {
@@ -550,7 +573,10 @@ private:
 			return capabilities.currentExtent;
 		}
 		else {
-			vk::Extent2D actualExtent = {WIDTH, HEIGHT};
+			int width, height;
+			SDL_GetWindowSize(window, &width, &height);
+
+			vk::Extent2D actualExtent = {(uint32_t) width, (uint32_t) height};
 
 			actualExtent.width = std::clamp(actualExtent.width, capabilities.minImageExtent.width, capabilities.maxImageExtent.width);
 			actualExtent.height = std::clamp(actualExtent.height, capabilities.minImageExtent.height, capabilities.maxImageExtent.height);
