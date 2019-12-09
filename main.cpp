@@ -99,7 +99,7 @@ struct Vertex {
 };
 
 const std::vector<Vertex> vertices = {
-	{{0.0f, -0.5f}, {1.0f, 0.0f, 0.0f}},
+	{{0.0f, -0.5f}, {1.0f, 1.0f, 1.0f}},
 	{{0.5f, 0.5f}, {0.0f, 1.0f, 0.0f}},
 	{{-0.5f, 0.5f}, {0.0f, 0.0f, 1.0f}}
 };
@@ -148,6 +148,9 @@ private:
 	std::vector<size_t> imagesInFlight;
 	size_t currentFrame = 0;
 
+	vk::UniqueBuffer vertexBuffer;
+	vk::UniqueDeviceMemory vertexBufferMemory;
+
 	void initWindow() {
 		if (SDL_Init(SDL_INIT_VIDEO) < 0)
 			throw std::runtime_error("failed to initialise SDL!");
@@ -169,6 +172,7 @@ private:
 		createGraphicsPipeline();
 		createFramebuffers();
 		createCommandPool();
+		createVertexBuffer();
 		createCommandBuffers();
 		createSyncObjects();
 	}
@@ -488,6 +492,44 @@ private:
 		);
 	}
 
+	void createVertexBuffer() {
+		vk::BufferCreateInfo bufferCreateInfo(
+			vk::BufferCreateFlags(), sizeof(vertices[0]) * vertices.size(),
+			vk::BufferUsageFlagBits::eVertexBuffer, vk::SharingMode::eExclusive
+		);
+
+		vertexBuffer = device->createBufferUnique(bufferCreateInfo);
+
+		vk::MemoryRequirements memRequirements = device->getBufferMemoryRequirements(vertexBuffer.get());
+
+		vertexBufferMemory = device->allocateMemoryUnique(
+			vk::MemoryAllocateInfo(
+				memRequirements.size,
+				findMemoryType(
+					memRequirements.memoryTypeBits, 
+					vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent
+				)
+			)
+		);
+
+		device->bindBufferMemory(vertexBuffer.get(), vertexBufferMemory.get(), 0);
+
+		void* data = device->mapMemory(vertexBufferMemory.get(), 0, bufferCreateInfo.size, vk::MemoryMapFlags());
+		memcpy(data, vertices.data(), (size_t)bufferCreateInfo.size);
+		device->unmapMemory(vertexBufferMemory.get());
+	}
+
+	uint32_t findMemoryType(uint32_t typeFilter, vk::MemoryPropertyFlags properties) {
+		vk::PhysicalDeviceMemoryProperties memProperties = physicalDevice.getMemoryProperties();
+
+		for (uint32_t i = 0; i < memProperties.memoryTypeCount; ++i) {
+			if (typeFilter & (1 << i) && (memProperties.memoryTypes[i].propertyFlags & properties) == properties)
+				return i;
+		}
+
+		throw std::runtime_error("failed to find suitable memory type!");
+	}
+
 	void createCommandBuffers() {
 		commandBuffers.resize(swapchainFramebuffers.size());
 
@@ -513,7 +555,9 @@ private:
 
 			commandBuffers[i]->bindPipeline(vk::PipelineBindPoint::eGraphics, graphicsPipelines[0].get());
 
-			commandBuffers[i]->draw(3, 1, 0, 0);
+			commandBuffers[i]->bindVertexBuffers(0, {vertexBuffer.get()}, {0});
+
+			commandBuffers[i]->draw(static_cast<uint32_t>(vertices.size()), 1, 0, 0);
 
 			commandBuffers[i]->endRenderPass();
 
