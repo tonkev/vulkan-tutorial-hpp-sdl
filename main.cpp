@@ -493,30 +493,73 @@ private:
 	}
 
 	void createVertexBuffer() {
-		vk::BufferCreateInfo bufferCreateInfo(
-			vk::BufferCreateFlags(), sizeof(vertices[0]) * vertices.size(),
-			vk::BufferUsageFlagBits::eVertexBuffer, vk::SharingMode::eExclusive
+		vk::DeviceSize bufferSize = sizeof(vertices[0]) * vertices.size();
+
+		vk::UniqueBuffer stagingBuffer;
+		vk::UniqueDeviceMemory stagingBufferMemory;
+		createBuffer(
+			bufferSize, vk::BufferUsageFlagBits::eTransferSrc,
+			vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent,
+			stagingBuffer, stagingBufferMemory
 		);
 
-		vertexBuffer = device->createBufferUnique(bufferCreateInfo);
+		void* data = device->mapMemory(stagingBufferMemory.get(), 0, bufferSize, vk::MemoryMapFlags());
+		memcpy(data, vertices.data(), (size_t)bufferSize);
+		device->unmapMemory(stagingBufferMemory.get());
 
-		vk::MemoryRequirements memRequirements = device->getBufferMemoryRequirements(vertexBuffer.get());
+		createBuffer(
+			bufferSize, vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eVertexBuffer,
+			vk::MemoryPropertyFlagBits::eDeviceLocal,
+			vertexBuffer, vertexBufferMemory
+		);
 
-		vertexBufferMemory = device->allocateMemoryUnique(
+		copyBuffer(stagingBuffer.get(), vertexBuffer.get(), bufferSize);
+	}
+
+	void createBuffer(vk::DeviceSize size, vk::BufferUsageFlags usage, vk::MemoryPropertyFlags properties, vk::UniqueBuffer& buffer, vk::UniqueDeviceMemory& bufferMemory) {
+		vk::BufferCreateInfo bufferCreateInfo(
+			vk::BufferCreateFlags(), size,
+			usage, vk::SharingMode::eExclusive
+		);
+
+		buffer = device->createBufferUnique(bufferCreateInfo);
+
+		vk::MemoryRequirements memRequirements = device->getBufferMemoryRequirements(buffer.get());
+
+		bufferMemory = device->allocateMemoryUnique(
 			vk::MemoryAllocateInfo(
 				memRequirements.size,
-				findMemoryType(
-					memRequirements.memoryTypeBits, 
-					vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent
-				)
+				findMemoryType(memRequirements.memoryTypeBits, properties)
 			)
 		);
 
-		device->bindBufferMemory(vertexBuffer.get(), vertexBufferMemory.get(), 0);
+		device->bindBufferMemory(buffer.get(), bufferMemory.get(), 0);
+	}
 
-		void* data = device->mapMemory(vertexBufferMemory.get(), 0, bufferCreateInfo.size, vk::MemoryMapFlags());
-		memcpy(data, vertices.data(), (size_t)bufferCreateInfo.size);
-		device->unmapMemory(vertexBufferMemory.get());
+	void copyBuffer(vk::Buffer srcBuffer, vk::Buffer dstBuffer, vk::DeviceSize size) {
+		std::vector<vk::UniqueCommandBuffer> commandBuffers = device->allocateCommandBuffersUnique(
+			vk::CommandBufferAllocateInfo(
+				commandPool.get(), vk::CommandBufferLevel::ePrimary, 1
+			)
+		);
+
+		commandBuffers[0]->begin(
+			vk::CommandBufferBeginInfo(
+				vk::CommandBufferUsageFlagBits::eOneTimeSubmit, nullptr
+			)
+		);
+
+		vk::BufferCopy copyRegion(0, 0, size);
+		commandBuffers[0]->copyBuffer(srcBuffer, dstBuffer, copyRegion);
+
+		commandBuffers[0]->end();
+
+		vk::SubmitInfo submitInfo = {};
+		submitInfo.commandBufferCount = 1;
+		submitInfo.pCommandBuffers = &commandBuffers[0].get();
+
+		graphicsQueue.submit(submitInfo, nullptr);
+		graphicsQueue.waitIdle();
 	}
 
 	uint32_t findMemoryType(uint32_t typeFilter, vk::MemoryPropertyFlags properties) {
