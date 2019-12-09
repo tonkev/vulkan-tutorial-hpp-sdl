@@ -99,9 +99,14 @@ struct Vertex {
 };
 
 const std::vector<Vertex> vertices = {
-	{{0.0f, -0.5f}, {1.0f, 1.0f, 1.0f}},
-	{{0.5f, 0.5f}, {0.0f, 1.0f, 0.0f}},
-	{{-0.5f, 0.5f}, {0.0f, 0.0f, 1.0f}}
+	{{-0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}},
+	{{0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}},
+	{{0.5f, 0.5f}, {0.0f, 0.0f, 1.0f}},
+	{{-0.5f, 0.5f}, {1.0f, 1.0f, 1.0f}}
+};
+
+const std::vector<uint16_t> indices = {
+	0, 1, 2, 2, 3, 0
 };
 
 class HelloTriangleApplication {
@@ -140,6 +145,12 @@ private:
 	std::vector<vk::UniquePipeline> graphicsPipelines;
 
 	vk::UniqueCommandPool commandPool;
+
+	vk::UniqueBuffer vertexBuffer;
+	vk::UniqueDeviceMemory vertexBufferMemory;
+	vk::UniqueBuffer indexBuffer;
+	vk::UniqueDeviceMemory indexBufferMemory;
+
 	std::vector<vk::UniqueCommandBuffer> commandBuffers;
 
 	std::vector<vk::UniqueSemaphore> imageAvailableSemaphores;
@@ -147,9 +158,6 @@ private:
 	std::vector<vk::UniqueFence> inFlightFences;
 	std::vector<size_t> imagesInFlight;
 	size_t currentFrame = 0;
-
-	vk::UniqueBuffer vertexBuffer;
-	vk::UniqueDeviceMemory vertexBufferMemory;
 
 	void initWindow() {
 		if (SDL_Init(SDL_INIT_VIDEO) < 0)
@@ -173,6 +181,7 @@ private:
 		createFramebuffers();
 		createCommandPool();
 		createVertexBuffer();
+		createIndexBuffer();
 		createCommandBuffers();
 		createSyncObjects();
 	}
@@ -516,6 +525,30 @@ private:
 		copyBuffer(stagingBuffer.get(), vertexBuffer.get(), bufferSize);
 	}
 
+	void createIndexBuffer() {
+		vk::DeviceSize bufferSize = sizeof(indices[0]) * indices.size();
+
+		vk::UniqueBuffer stagingBuffer;
+		vk::UniqueDeviceMemory stagingBufferMemory;
+		createBuffer(
+			bufferSize, vk::BufferUsageFlagBits::eTransferSrc,
+			vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent,
+			stagingBuffer, stagingBufferMemory
+		);
+
+		void* data = device->mapMemory(stagingBufferMemory.get(), 0, bufferSize, vk::MemoryMapFlags());
+		memcpy(data, indices.data(), (size_t)bufferSize);
+		device->unmapMemory(stagingBufferMemory.get());
+
+		createBuffer(
+			bufferSize, vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eIndexBuffer,
+			vk::MemoryPropertyFlagBits::eDeviceLocal,
+			indexBuffer, indexBufferMemory
+		);
+
+		copyBuffer(stagingBuffer.get(), indexBuffer.get(), bufferSize);
+	}
+
 	void createBuffer(vk::DeviceSize size, vk::BufferUsageFlags usage, vk::MemoryPropertyFlags properties, vk::UniqueBuffer& buffer, vk::UniqueDeviceMemory& bufferMemory) {
 		vk::BufferCreateInfo bufferCreateInfo(
 			vk::BufferCreateFlags(), size,
@@ -600,7 +633,9 @@ private:
 
 			commandBuffers[i]->bindVertexBuffers(0, {vertexBuffer.get()}, {0});
 
-			commandBuffers[i]->draw(static_cast<uint32_t>(vertices.size()), 1, 0, 0);
+			commandBuffers[i]->bindIndexBuffer(indexBuffer.get(), 0, vk::IndexType::eUint16);
+
+			commandBuffers[i]->drawIndexed(static_cast<uint32_t>(indices.size()), 1, 0, 0, 0);
 
 			commandBuffers[i]->endRenderPass();
 
