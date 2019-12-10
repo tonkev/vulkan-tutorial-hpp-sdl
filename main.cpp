@@ -4,7 +4,9 @@
 #include <SDL_vulkan.h>
 
 #include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
 
+#include <chrono>
 #include <iostream>
 #include <fstream>
 #include <stdexcept>
@@ -98,6 +100,12 @@ struct Vertex {
 	}
 };
 
+struct UniformBufferObject {
+	glm::mat4 model;
+	glm::mat4 view;
+	glm::mat4 proj;
+};
+
 const std::vector<Vertex> vertices = {
 	{{-0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}},
 	{{0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}},
@@ -141,6 +149,7 @@ private:
 	std::vector<vk::UniqueFramebuffer> swapchainFramebuffers;
 
 	vk::UniqueRenderPass renderPass;
+	vk::UniqueDescriptorSetLayout descriptorSetLayout;
 	vk::UniquePipelineLayout pipelineLayout;
 	std::vector<vk::UniquePipeline> graphicsPipelines;
 
@@ -150,6 +159,9 @@ private:
 	vk::UniqueDeviceMemory vertexBufferMemory;
 	vk::UniqueBuffer indexBuffer;
 	vk::UniqueDeviceMemory indexBufferMemory;
+
+	std::vector<vk::UniqueBuffer> uniformBuffers;
+	std::vector<vk::UniqueDeviceMemory> uniformBuffersMemory;
 
 	std::vector<vk::UniqueCommandBuffer> commandBuffers;
 
@@ -177,11 +189,13 @@ private:
 		createSwapchain();
 		createImageViews();
 		createRenderPass();
+		createDescriptorSetLayout();
 		createGraphicsPipeline();
 		createFramebuffers();
 		createCommandPool();
 		createVertexBuffer();
 		createIndexBuffer();
+		createUniformBuffers();
 		createCommandBuffers();
 		createSyncObjects();
 	}
@@ -396,6 +410,21 @@ private:
 		);
 	}
 
+	void createDescriptorSetLayout() {
+		vk::DescriptorSetLayoutBinding uboLayoutBinding = {};
+		uboLayoutBinding.binding = 0;
+		uboLayoutBinding.descriptorType = vk::DescriptorType::eUniformBuffer;
+		uboLayoutBinding.descriptorCount = 1;
+		uboLayoutBinding.stageFlags = vk::ShaderStageFlagBits::eVertex;
+		uboLayoutBinding.pImmutableSamplers = nullptr;
+
+		descriptorSetLayout = device->createDescriptorSetLayoutUnique(
+			vk::DescriptorSetLayoutCreateInfo(
+				vk::DescriptorSetLayoutCreateFlags(), 1, &uboLayoutBinding
+			)
+		);
+	}
+
 	void createGraphicsPipeline() {
 		auto vertShaderCode = readFile("shaders/vert.spv");
 		auto fragShaderCode = readFile("shaders/frag.spv");
@@ -455,7 +484,11 @@ private:
 		);
 
 		pipelineLayout = device->createPipelineLayoutUnique(
-			vk::PipelineLayoutCreateInfo(vk::PipelineLayoutCreateFlags(), 0, nullptr, 0, nullptr)
+			vk::PipelineLayoutCreateInfo(
+				vk::PipelineLayoutCreateFlags(),
+				1, &descriptorSetLayout.get(),
+				0, nullptr
+			)
 		);
 
 		vk::GraphicsPipelineCreateInfo pipelineInfo;
@@ -547,6 +580,21 @@ private:
 		);
 
 		copyBuffer(stagingBuffer.get(), indexBuffer.get(), bufferSize);
+	}
+
+	void createUniformBuffers() {
+		vk::DeviceSize bufferSize = sizeof(UniformBufferObject);
+
+		uniformBuffers.resize(swapchainImages.size());
+		uniformBuffersMemory.resize(swapchainImages.size());
+
+		for (size_t i = 0; i < swapchainImages.size(); ++i) {
+			createBuffer(
+				bufferSize, vk::BufferUsageFlagBits::eUniformBuffer,
+				vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent,
+				uniformBuffers[i], uniformBuffersMemory[i]
+			);
+		}
 	}
 
 	void createBuffer(vk::DeviceSize size, vk::BufferUsageFlags usage, vk::MemoryPropertyFlags properties, vk::UniqueBuffer& buffer, vk::UniqueDeviceMemory& bufferMemory) {
@@ -656,6 +704,23 @@ private:
 		}
 	}
 
+	void updateUniformBuffer(uint32_t currentImage) {
+		static auto startTime = std::chrono::high_resolution_clock::now();
+
+		auto currentTime = std::chrono::high_resolution_clock::now();
+		float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
+
+		UniformBufferObject ubo = {};
+		ubo.model = glm::rotate(glm::mat4(1.0f), time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+		ubo.view = glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+		ubo.proj = glm::perspective(glm::radians(45.0f), swapchainExtent.width / (float)swapchainExtent.height, 0.1f, 10.0f);
+		ubo.proj[1][1] *= -1;
+
+		void* data = device->mapMemory(uniformBuffersMemory[currentImage].get(), 0, sizeof(ubo), vk::MemoryMapFlags());
+		memcpy(data, &ubo, sizeof(ubo));
+		device->unmapMemory(uniformBuffersMemory[currentImage].get());
+	}
+
 	void drawFrame() {
 		device->waitForFences(1, &inFlightFences[currentFrame].get(), true, UINT64_MAX);
 
@@ -673,6 +738,8 @@ private:
 		vk::PipelineStageFlags waitStages = {vk::PipelineStageFlagBits::eColorAttachmentOutput};
 
 		device->resetFences(1, &inFlightFences[currentFrame].get());
+
+		updateUniformBuffer(result.value);
 
 		graphicsQueue.submit(
 			vk::SubmitInfo(
@@ -703,8 +770,11 @@ private:
 		createFramebuffers();
 
 		commandBuffers.clear();
+		uniformBuffers.clear();
+		uniformBuffersMemory.clear();
 
 		createCommandPool();
+		createUniformBuffers();
 		createCommandBuffers();
 	}
 
