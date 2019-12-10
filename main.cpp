@@ -163,6 +163,9 @@ private:
 	std::vector<vk::UniqueBuffer> uniformBuffers;
 	std::vector<vk::UniqueDeviceMemory> uniformBuffersMemory;
 
+	vk::UniqueDescriptorPool descriptorPool;
+	std::vector<vk::DescriptorSet> descriptorSets;
+
 	std::vector<vk::UniqueCommandBuffer> commandBuffers;
 
 	std::vector<vk::UniqueSemaphore> imageAvailableSemaphores;
@@ -196,6 +199,8 @@ private:
 		createVertexBuffer();
 		createIndexBuffer();
 		createUniformBuffers();
+		createDescriptorPool();
+		createDescriptorSets();
 		createCommandBuffers();
 		createSyncObjects();
 	}
@@ -464,7 +469,7 @@ private:
 
 		vk::PipelineRasterizationStateCreateInfo rasterizer(
 			vk::PipelineRasterizationStateCreateFlags(), false, false,
-			vk::PolygonMode::eFill, vk::CullModeFlagBits::eBack, vk::FrontFace::eClockwise, 
+			vk::PolygonMode::eFill, vk::CullModeFlagBits::eBack, vk::FrontFace::eCounterClockwise, 
 			false, 0.0f, 0.0f, 0.0f, 1.0f
 		);
 
@@ -597,6 +602,47 @@ private:
 		}
 	}
 
+	void createDescriptorPool() {
+		vk::DescriptorPoolSize poolSize = {};
+		poolSize.type = vk::DescriptorType::eUniformBuffer;
+		poolSize.descriptorCount = static_cast<uint32_t>(swapchainImages.size());
+
+		vk::DescriptorPoolCreateInfo poolInfo = {};
+		poolInfo.poolSizeCount = 1;
+		poolInfo.pPoolSizes = &poolSize;
+		poolInfo.maxSets = static_cast<uint32_t>(swapchainImages.size());
+
+		descriptorPool = device->createDescriptorPoolUnique(poolInfo);
+	}
+
+	void createDescriptorSets() {
+		std::vector<vk::DescriptorSetLayout> layouts(swapchainImages.size(), descriptorSetLayout.get());
+
+		vk::DescriptorSetAllocateInfo allocInfo = {};
+		allocInfo.descriptorPool = descriptorPool.get();
+		allocInfo.descriptorSetCount = static_cast<uint32_t>(swapchainImages.size());
+		allocInfo.pSetLayouts = layouts.data();
+
+		descriptorSets = device->allocateDescriptorSets(allocInfo);
+
+		for (size_t i = 0; i < swapchainImages.size(); ++i) {
+			vk::DescriptorBufferInfo bufferInfo = {};
+			bufferInfo.buffer = uniformBuffers[i].get();
+			bufferInfo.offset = 0;
+			bufferInfo.range = sizeof(UniformBufferObject);
+
+			vk::WriteDescriptorSet descriptorWrite = {};
+			descriptorWrite.dstSet = descriptorSets[i];
+			descriptorWrite.dstBinding = 0;
+			descriptorWrite.dstArrayElement = 0;
+			descriptorWrite.descriptorType = vk::DescriptorType::eUniformBuffer;
+			descriptorWrite.descriptorCount = 1;
+			descriptorWrite.pBufferInfo = &bufferInfo;
+
+			device->updateDescriptorSets(1, &descriptorWrite, 0, nullptr);
+		}
+	}
+
 	void createBuffer(vk::DeviceSize size, vk::BufferUsageFlags usage, vk::MemoryPropertyFlags properties, vk::UniqueBuffer& buffer, vk::UniqueDeviceMemory& bufferMemory) {
 		vk::BufferCreateInfo bufferCreateInfo(
 			vk::BufferCreateFlags(), size,
@@ -682,6 +728,8 @@ private:
 			commandBuffers[i]->bindVertexBuffers(0, {vertexBuffer.get()}, {0});
 
 			commandBuffers[i]->bindIndexBuffer(indexBuffer.get(), 0, vk::IndexType::eUint16);
+
+			commandBuffers[i]->bindDescriptorSets(vk::PipelineBindPoint::eGraphics, pipelineLayout.get(), 0, 1, &descriptorSets[i], 0, nullptr);
 
 			commandBuffers[i]->drawIndexed(static_cast<uint32_t>(indices.size()), 1, 0, 0, 0);
 
@@ -775,6 +823,8 @@ private:
 
 		createCommandPool();
 		createUniformBuffers();
+		createDescriptorPool();
+		createDescriptorSets();
 		createCommandBuffers();
 	}
 
