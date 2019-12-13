@@ -3,6 +3,7 @@
 #include <SDL.h>
 #include <SDL_vulkan.h>
 
+#define GLM_FORCE_RADIANS
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
@@ -160,6 +161,8 @@ private:
 
 	vk::UniqueImage textureImage;
 	vk::UniqueDeviceMemory textureImageMemory;
+	vk::UniqueImageView textureImageView;
+	vk::UniqueSampler textureSampler;
 
 	vk::UniqueBuffer vertexBuffer;
 	vk::UniqueDeviceMemory vertexBufferMemory;
@@ -203,6 +206,8 @@ private:
 		createFramebuffers();
 		createCommandPool();
 		createTextureImage();
+		createTextureImageView();
+		createTextureSampler();
 		createVertexBuffer();
 		createIndexBuffer();
 		createUniformBuffers();
@@ -319,7 +324,9 @@ private:
 				vk::DeviceQueueCreateInfo({}, queueFamily, 1, &queuePriority)
 			);
 		}
+
 		vk::PhysicalDeviceFeatures deviceFeatures = {};
+		deviceFeatures.samplerAnisotropy = true;
 
 		uint32_t enabledLayerCount = 0;
 		if (enableValidationLayers)
@@ -379,16 +386,7 @@ private:
 		swapchainImageViews.resize(swapchainImages.size());
 
 		for (size_t i = 0; i < swapchainImages.size(); ++i) {
-			swapchainImageViews[i] = device->createImageViewUnique(
-				vk::ImageViewCreateInfo(
-					vk::ImageViewCreateFlags(), swapchainImages[i],
-					vk::ImageViewType::e2D, swapchainImageFormat,
-					vk::ComponentMapping(),
-					vk::ImageSubresourceRange(
-						vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1
-					)
-				)
-			);
+			swapchainImageViews[i] = createImageView(swapchainImages[i], swapchainImageFormat);
 		}
 	}
 
@@ -577,6 +575,45 @@ private:
 		transitionImageLayout(textureImage.get(), vk::Format::eR8G8B8A8Unorm, vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal);
 		copyBufferToImage(stagingBuffer.get(), textureImage.get(), texWidth, texHeight);
 		transitionImageLayout(textureImage.get(), vk::Format::eR8G8B8A8Unorm, vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::eShaderReadOnlyOptimal);
+	}
+
+	void createTextureImageView() {
+		textureImageView = createImageView(textureImage.get(), vk::Format::eR8G8B8A8Unorm);
+	}
+
+	void createTextureSampler() {
+		vk::SamplerCreateInfo samplerInfo = {};
+		samplerInfo.magFilter = vk::Filter::eLinear;
+		samplerInfo.minFilter = vk::Filter::eLinear;
+		samplerInfo.addressModeU = vk::SamplerAddressMode::eRepeat;
+		samplerInfo.addressModeV = vk::SamplerAddressMode::eRepeat;
+		samplerInfo.addressModeW = vk::SamplerAddressMode::eRepeat;
+		samplerInfo.anisotropyEnable = true;
+		samplerInfo.maxAnisotropy = 16;
+		samplerInfo.borderColor = vk::BorderColor::eIntOpaqueBlack;
+		samplerInfo.unnormalizedCoordinates = false;
+		samplerInfo.compareEnable = false;
+		samplerInfo.compareOp = vk::CompareOp::eAlways;
+		samplerInfo.mipmapMode = vk::SamplerMipmapMode::eLinear;
+		samplerInfo.mipLodBias = 0.0f;
+		samplerInfo.minLod = 0.0f;
+		samplerInfo.maxLod = 0.0f;
+
+		textureSampler = device->createSamplerUnique(samplerInfo);
+	}
+
+	vk::UniqueImageView createImageView(vk::Image image, vk::Format format) {
+		vk::ImageViewCreateInfo viewInfo = {};
+		viewInfo.image = image;
+		viewInfo.viewType = vk::ImageViewType::e2D;
+		viewInfo.format = format;
+		viewInfo.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
+		viewInfo.subresourceRange.baseMipLevel = 0;
+		viewInfo.subresourceRange.levelCount = 1;
+		viewInfo.subresourceRange.baseArrayLayer = 0;
+		viewInfo.subresourceRange.layerCount = 1;
+
+		return device->createImageViewUnique(viewInfo);
 	}
 
 	void createImage(
@@ -1029,7 +1066,9 @@ private:
 			swapchainAdequate = !swapchainSupport.formats.empty() && !swapchainSupport.presentModes.empty();
 		}
 
-		return indices.isComplete() && swapchainAdequate;
+		vk::PhysicalDeviceFeatures supportedFeatures = device.getFeatures();
+
+		return indices.isComplete() && swapchainAdequate && supportedFeatures.samplerAnisotropy;
 	}
 
 	bool checkDeviceExtensionSupport(vk::PhysicalDevice device) {
