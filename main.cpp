@@ -76,6 +76,7 @@ struct SwapchainSupportDetails {
 struct Vertex {
 	glm::vec2 pos;
 	glm::vec3 color;
+	glm::vec2 texCoord;
 
 	static vk::VertexInputBindingDescription getBindingDescription() {
 		vk::VertexInputBindingDescription bindingDescription = {};
@@ -87,8 +88,8 @@ struct Vertex {
 		return bindingDescription;
 	}
 
-	static std::array<vk::VertexInputAttributeDescription, 2> getAttributeDescriptions() {
-		std::array<vk::VertexInputAttributeDescription, 2> attributeDescriptions = {};
+	static std::array<vk::VertexInputAttributeDescription, 3> getAttributeDescriptions() {
+		std::array<vk::VertexInputAttributeDescription, 3> attributeDescriptions = {};
 
 		attributeDescriptions[0].binding = 0;
 		attributeDescriptions[0].location = 0;
@@ -99,6 +100,11 @@ struct Vertex {
 		attributeDescriptions[1].location = 1;
 		attributeDescriptions[1].format = vk::Format::eR32G32B32Sfloat;
 		attributeDescriptions[1].offset = offsetof(Vertex, color);
+
+		attributeDescriptions[2].binding = 0;
+		attributeDescriptions[2].location = 2;
+		attributeDescriptions[2].format = vk::Format::eR32G32Sfloat;
+		attributeDescriptions[2].offset = offsetof(Vertex, texCoord);
 
 		return attributeDescriptions;
 	}
@@ -111,10 +117,10 @@ struct UniformBufferObject {
 };
 
 const std::vector<Vertex> vertices = {
-	{{-0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}},
-	{{0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}},
-	{{0.5f, 0.5f}, {0.0f, 0.0f, 1.0f}},
-	{{-0.5f, 0.5f}, {1.0f, 1.0f, 1.0f}}
+	{{-0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}, {1.0f, 0.0f}},
+	{{0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f}},
+	{{0.5f, 0.5f}, {0.0f, 0.0f, 1.0f}, {0.0f, 1.0f}},
+	{{-0.5f, 0.5f}, {1.0f, 1.0f, 1.0f}, {1.0f, 1.0f}}
 };
 
 const std::vector<uint16_t> indices = {
@@ -428,11 +434,19 @@ private:
 		uboLayoutBinding.stageFlags = vk::ShaderStageFlagBits::eVertex;
 		uboLayoutBinding.pImmutableSamplers = nullptr;
 
-		descriptorSetLayout = device->createDescriptorSetLayoutUnique(
-			vk::DescriptorSetLayoutCreateInfo(
-				vk::DescriptorSetLayoutCreateFlags(), 1, &uboLayoutBinding
-			)
-		);
+		vk::DescriptorSetLayoutBinding samplerLayoutBinding = {};
+		samplerLayoutBinding.binding = 1;
+		samplerLayoutBinding.descriptorCount = 1;
+		samplerLayoutBinding.descriptorType = vk::DescriptorType::eCombinedImageSampler;
+		samplerLayoutBinding.pImmutableSamplers = nullptr;
+		samplerLayoutBinding.stageFlags = vk::ShaderStageFlagBits::eFragment;
+
+		std::array<vk::DescriptorSetLayoutBinding, 2> bindings = { uboLayoutBinding, samplerLayoutBinding };
+		vk::DescriptorSetLayoutCreateInfo layoutInfo = {};
+		layoutInfo.bindingCount = static_cast<uint32_t>(bindings.size());
+		layoutInfo.pBindings = bindings.data();
+
+		descriptorSetLayout = device->createDescriptorSetLayoutUnique(layoutInfo);
 	}
 
 	void createGraphicsPipeline() {
@@ -457,7 +471,7 @@ private:
 		vk::PipelineVertexInputStateCreateInfo vertexInputInfo(
 			vk::PipelineVertexInputStateCreateFlags(), 
 			1, &bindingDescription,
-			2, attributeDescriptions.data()
+			attributeDescriptions.size(), attributeDescriptions.data()
 		);
 
 		vk::PipelineInputAssemblyStateCreateInfo inputAssembly(
@@ -769,13 +783,15 @@ private:
 	}
 
 	void createDescriptorPool() {
-		vk::DescriptorPoolSize poolSize = {};
-		poolSize.type = vk::DescriptorType::eUniformBuffer;
-		poolSize.descriptorCount = static_cast<uint32_t>(swapchainImages.size());
+		std::array<vk::DescriptorPoolSize, 2> poolSizes = {};
+		poolSizes[0].type = vk::DescriptorType::eUniformBuffer;
+		poolSizes[0].descriptorCount = static_cast<uint32_t>(swapchainImages.size());
+		poolSizes[1].type = vk::DescriptorType::eCombinedImageSampler;
+		poolSizes[1].descriptorCount = static_cast<uint32_t>(swapchainImages.size());
 
 		vk::DescriptorPoolCreateInfo poolInfo = {};
-		poolInfo.poolSizeCount = 1;
-		poolInfo.pPoolSizes = &poolSize;
+		poolInfo.poolSizeCount = poolSizes.size();
+		poolInfo.pPoolSizes = poolSizes.data();
 		poolInfo.maxSets = static_cast<uint32_t>(swapchainImages.size());
 
 		descriptorPool = device->createDescriptorPoolUnique(poolInfo);
@@ -797,15 +813,28 @@ private:
 			bufferInfo.offset = 0;
 			bufferInfo.range = sizeof(UniformBufferObject);
 
-			vk::WriteDescriptorSet descriptorWrite = {};
-			descriptorWrite.dstSet = descriptorSets[i];
-			descriptorWrite.dstBinding = 0;
-			descriptorWrite.dstArrayElement = 0;
-			descriptorWrite.descriptorType = vk::DescriptorType::eUniformBuffer;
-			descriptorWrite.descriptorCount = 1;
-			descriptorWrite.pBufferInfo = &bufferInfo;
+			vk::DescriptorImageInfo imageInfo = {};
+			imageInfo.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
+			imageInfo.imageView = textureImageView.get();
+			imageInfo.sampler = textureSampler.get();
 
-			device->updateDescriptorSets(1, &descriptorWrite, 0, nullptr);
+			std::array<vk::WriteDescriptorSet, 2> descriptorWrites = {};
+
+			descriptorWrites[0].dstSet = descriptorSets[i];
+			descriptorWrites[0].dstBinding = 0;
+			descriptorWrites[0].dstArrayElement = 0;
+			descriptorWrites[0].descriptorType = vk::DescriptorType::eUniformBuffer;
+			descriptorWrites[0].descriptorCount = 1;
+			descriptorWrites[0].pBufferInfo = &bufferInfo;
+
+			descriptorWrites[1].dstSet = descriptorSets[i];
+			descriptorWrites[1].dstBinding = 1;
+			descriptorWrites[1].dstArrayElement = 0;
+			descriptorWrites[1].descriptorType = vk::DescriptorType::eCombinedImageSampler;
+			descriptorWrites[1].descriptorCount = 1;
+			descriptorWrites[1].pImageInfo = &imageInfo;
+
+			device->updateDescriptorSets(descriptorWrites.size(), descriptorWrites.data(), 0, nullptr);
 		}
 	}
 
