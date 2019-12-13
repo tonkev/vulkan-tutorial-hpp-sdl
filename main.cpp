@@ -157,6 +157,7 @@ private:
 	vk::UniqueSurfaceKHR surface;
 
 	vk::PhysicalDevice physicalDevice;
+	vk::SampleCountFlagBits msaaSamples = vk::SampleCountFlagBits::e1;
 	vk::UniqueDevice device;
 
 	vk::Queue graphicsQueue;
@@ -175,6 +176,10 @@ private:
 	std::vector<vk::UniquePipeline> graphicsPipelines;
 
 	vk::UniqueCommandPool commandPool;
+
+	vk::UniqueImage colorImage;
+	vk::UniqueDeviceMemory colorImageMemory;
+	vk::UniqueImageView colorImageView;
 
 	vk::UniqueImage depthImage;
 	vk::UniqueDeviceMemory depthImageMemory;
@@ -228,6 +233,7 @@ private:
 		createDescriptorSetLayout();
 		createGraphicsPipeline();
 		createCommandPool();
+		createColorResources();
 		createDepthResources();
 		createFramebuffers();
 		createTextureImage();
@@ -329,6 +335,7 @@ private:
 		for (const auto& device : physicalDevices) {
 			if (isDeviceSuitable(device)) {
 				physicalDevice = device;
+				msaaSamples = getMaxUsableSampleCount();
 				deviceFound = true;
 				break;
 			}
@@ -336,6 +343,21 @@ private:
 
 		if (!deviceFound)
 			throw std::runtime_error("failed to find a suitable GPU!");
+	}
+
+	vk::SampleCountFlagBits getMaxUsableSampleCount() {
+		vk::PhysicalDeviceProperties physicalDeviceProperties = physicalDevice.getProperties();
+
+		vk::SampleCountFlags counts = physicalDeviceProperties.limits.framebufferColorSampleCounts &
+			physicalDeviceProperties.limits.framebufferDepthSampleCounts;
+		if (counts & vk::SampleCountFlagBits::e64) return vk::SampleCountFlagBits::e64;
+		if (counts & vk::SampleCountFlagBits::e32) return vk::SampleCountFlagBits::e32;
+		if (counts & vk::SampleCountFlagBits::e16) return vk::SampleCountFlagBits::e16;
+		if (counts & vk::SampleCountFlagBits::e8) return vk::SampleCountFlagBits::e8;
+		if (counts & vk::SampleCountFlagBits::e4) return vk::SampleCountFlagBits::e4;
+		if (counts & vk::SampleCountFlagBits::e2) return vk::SampleCountFlagBits::e2;
+
+		return vk::SampleCountFlagBits::e1;
 	}
 
 	void createLogicalDevice() {
@@ -353,6 +375,7 @@ private:
 
 		vk::PhysicalDeviceFeatures deviceFeatures = {};
 		deviceFeatures.samplerAnisotropy = true;
+		deviceFeatures.sampleRateShading = true;
 
 		uint32_t enabledLayerCount = 0;
 		if (enableValidationLayers)
@@ -419,17 +442,17 @@ private:
 	void createRenderPass() {
 		vk::AttachmentDescription colorAttachment = {};
 		colorAttachment.format = swapchainImageFormat;
-		colorAttachment.samples = vk::SampleCountFlagBits::e1;
+		colorAttachment.samples = msaaSamples;
 		colorAttachment.loadOp = vk::AttachmentLoadOp::eClear;
 		colorAttachment.storeOp = vk::AttachmentStoreOp::eStore;
 		colorAttachment.stencilLoadOp = vk::AttachmentLoadOp::eDontCare;
 		colorAttachment.stencilStoreOp = vk::AttachmentStoreOp::eDontCare;
 		colorAttachment.initialLayout = vk::ImageLayout::eUndefined;
-		colorAttachment.finalLayout = vk::ImageLayout::ePresentSrcKHR;
+		colorAttachment.finalLayout = vk::ImageLayout::eColorAttachmentOptimal;
 
 		vk::AttachmentDescription depthAttachment = {};
 		depthAttachment.format = findDepthFormat();
-		depthAttachment.samples = vk::SampleCountFlagBits::e1;
+		depthAttachment.samples = msaaSamples;
 		depthAttachment.loadOp = vk::AttachmentLoadOp::eClear;
 		depthAttachment.storeOp = vk::AttachmentStoreOp::eDontCare;
 		depthAttachment.stencilLoadOp = vk::AttachmentLoadOp::eDontCare;
@@ -437,15 +460,28 @@ private:
 		depthAttachment.initialLayout = vk::ImageLayout::eUndefined;
 		depthAttachment.finalLayout = vk::ImageLayout::ePresentSrcKHR;
 
+		vk::AttachmentDescription colorAttachmentResolve = {};
+		colorAttachmentResolve.format = swapchainImageFormat;
+		colorAttachmentResolve.samples = vk::SampleCountFlagBits::e1;
+		colorAttachmentResolve.loadOp = vk::AttachmentLoadOp::eDontCare;
+		colorAttachmentResolve.storeOp = vk::AttachmentStoreOp::eStore;
+		colorAttachmentResolve.stencilLoadOp = vk::AttachmentLoadOp::eDontCare;
+		colorAttachmentResolve.stencilStoreOp = vk::AttachmentStoreOp::eDontCare;
+		colorAttachmentResolve.initialLayout = vk::ImageLayout::eUndefined;
+		colorAttachmentResolve.finalLayout = vk::ImageLayout::ePresentSrcKHR;
+
 		vk::AttachmentReference colorAttachmentRef(0, vk::ImageLayout::eColorAttachmentOptimal);
 
 		vk::AttachmentReference depthAttachmentRef(1, vk::ImageLayout::eDepthStencilAttachmentOptimal);
+
+		vk::AttachmentReference colorAttachmentResolveRef(2, vk::ImageLayout::eColorAttachmentOptimal);
 
 		vk::SubpassDescription subpass;
 		subpass.pipelineBindPoint = vk::PipelineBindPoint::eGraphics;
 		subpass.colorAttachmentCount = 1;
 		subpass.pColorAttachments = &colorAttachmentRef;
 		subpass.pDepthStencilAttachment = &depthAttachmentRef;
+		subpass.pResolveAttachments = &colorAttachmentResolveRef;
 
 		vk::SubpassDependency dependency(
 			(uint32_t) VK_SUBPASS_EXTERNAL, (uint32_t) 0,
@@ -454,7 +490,7 @@ private:
 			vk::DependencyFlags()
 		);
 
-		std::array<vk::AttachmentDescription, 2> attachments = {colorAttachment, depthAttachment};
+		std::array<vk::AttachmentDescription, 3> attachments = {colorAttachment, depthAttachment, colorAttachmentResolve};
 		renderPass = device->createRenderPassUnique(
 			vk::RenderPassCreateInfo(
 				vk::RenderPassCreateFlags(), static_cast<uint32_t>(attachments.size()), attachments.data(), 1, &subpass, 1, &dependency
@@ -529,8 +565,8 @@ private:
 		);
 
 		vk::PipelineMultisampleStateCreateInfo multisampling(
-			vk::PipelineMultisampleStateCreateFlags(), vk::SampleCountFlagBits::e1, 
-			false, 1.0f, nullptr, false, false
+			vk::PipelineMultisampleStateCreateFlags(), msaaSamples, 
+			true, 0.2f, nullptr, false, false
 		);
 
 		vk::PipelineDepthStencilStateCreateInfo depthStencil = {};
@@ -579,7 +615,7 @@ private:
 		swapchainFramebuffers.resize(swapchainImageViews.size());
 
 		for (size_t i = 0; i < swapchainImageViews.size(); ++i) {
-			std::array<vk::ImageView, 2> attachments = {swapchainImageViews[i].get(), depthImageView.get()};
+			std::array<vk::ImageView, 3> attachments = {colorImageView.get(), depthImageView.get(), swapchainImageViews[i].get()};
 
 			swapchainFramebuffers[i] = device->createFramebufferUnique(
 				vk::FramebufferCreateInfo(
@@ -590,6 +626,18 @@ private:
 				)
 			);
 		}
+	}
+
+	void createColorResources() {
+		vk::Format colorFormat = swapchainImageFormat;
+
+		createImage(
+			swapchainExtent.width, swapchainExtent.height, 1, msaaSamples, colorFormat, vk::ImageTiling::eOptimal,
+			vk::ImageUsageFlagBits::eTransientAttachment | vk::ImageUsageFlagBits::eColorAttachment, vk::MemoryPropertyFlagBits::eDeviceLocal,
+			colorImage, colorImageMemory
+		);
+
+		colorImageView = createImageView(colorImage.get(), colorFormat, vk::ImageAspectFlagBits::eColor, 1);
 	}
 
 	void createCommandPool() {
@@ -606,7 +654,7 @@ private:
 		vk::Format depthFormat = findDepthFormat();
 
 		createImage(
-			swapchainExtent.width, swapchainExtent.height, 1, depthFormat, vk::ImageTiling::eOptimal,
+			swapchainExtent.width, swapchainExtent.height, 1, msaaSamples, depthFormat, vk::ImageTiling::eOptimal,
 			vk::ImageUsageFlagBits::eDepthStencilAttachment, vk::MemoryPropertyFlagBits::eDeviceLocal,
 			depthImage, depthImageMemory
 		);
@@ -664,7 +712,7 @@ private:
 		stbi_image_free(pixels);
 
 		createImage(
-			texWidth, texHeight, mipLevels, vk::Format::eR8G8B8A8Unorm, vk::ImageTiling::eOptimal,
+			texWidth, texHeight, mipLevels, vk::SampleCountFlagBits::e1, vk::Format::eR8G8B8A8Unorm, vk::ImageTiling::eOptimal,
 			vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled,
 			vk::MemoryPropertyFlagBits::eDeviceLocal, textureImage, textureImageMemory
 		);
@@ -795,7 +843,7 @@ private:
 	}
 
 	void createImage(
-			uint32_t width, uint32_t height, uint32_t mipLevels, vk::Format format, vk::ImageTiling tiling,
+			uint32_t width, uint32_t height, uint32_t mipLevels, vk::SampleCountFlagBits numSamples, vk::Format format, vk::ImageTiling tiling,
 			vk::ImageUsageFlags usage, vk::MemoryPropertyFlags properties, vk::UniqueImage& image, vk::UniqueDeviceMemory& imageMemory) {
 
 		vk::ImageCreateInfo imageInfo = {};
@@ -810,7 +858,7 @@ private:
 		imageInfo.initialLayout = vk::ImageLayout::eUndefined;
 		imageInfo.usage = usage;
 		imageInfo.sharingMode = vk::SharingMode::eExclusive;
-		imageInfo.samples = vk::SampleCountFlagBits::e1;
+		imageInfo.samples = numSamples;
 		imageInfo.mipLevels = mipLevels;
 
 		image = device->createImageUnique(imageInfo);
@@ -1221,6 +1269,7 @@ private:
 		createImageViews();
 		createRenderPass();
 		createGraphicsPipeline();
+		createColorResources();
 		createDepthResources();
 		createFramebuffers();
 
